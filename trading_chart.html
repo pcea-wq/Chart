@@ -299,9 +299,13 @@ setTimeout(() => {
 // ============================================================
 // MEXC API - Datos históricos
 // ============================================================
+// Proxy CORS porque MEXC no permite llamadas directas desde browsers
+const CORS_PROXY = 'https://corsproxy.io/?url=';
+
 async function fetchMEXCKlines(symbol, interval, limit = 500) {
   // MEXC Futures API pública - sin auth
-  const url = `https://contract.mexc.com/api/v1/contract/kline/${symbol}?interval=${interval}&limit=${limit}`;
+  const mexcUrl = `https://contract.mexc.com/api/v1/contract/kline/${symbol}?interval=${interval}&limit=${limit}`;
+  const url = CORS_PROXY + encodeURIComponent(mexcUrl);
   try {
     const res = await fetch(url);
     const json = await res.json();
@@ -324,7 +328,8 @@ async function fetchMEXCKlines(symbol, interval, limit = 500) {
 }
 
 async function fetchMEXCPrice(symbol) {
-  const url = `https://contract.mexc.com/api/v1/contract/ticker?symbol=${symbol}`;
+  const mexcUrl = `https://contract.mexc.com/api/v1/contract/ticker?symbol=${symbol}`;
+  const url = CORS_PROXY + encodeURIComponent(mexcUrl);
   try {
     const res = await fetch(url);
     const json = await res.json();
