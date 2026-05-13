@@ -392,6 +392,18 @@ async function loadChart() {
     candles = await fetchMEXCKlines(state.symbol, state.interval, 500);
   }
 
+  // Sanitizar: ordenar cronológicamente y eliminar duplicados
+  candles.sort((a, b) => a.time - b.time);
+  const dedup = [];
+  let lastT = -1;
+  for (const c of candles) {
+    if (c.time !== lastT) {
+      dedup.push(c);
+      lastT = c.time;
+    }
+  }
+  candles = dedup;
+
   state.candles = candles;
   state.liveCandles = [...candles];
   candleSeries.setData(candles);
@@ -447,24 +459,37 @@ async function tick() {
       last.high = Math.max(last.high, price);
       last.low = Math.min(last.low, price);
       last.close = price;
-      candleSeries.update(last);
-    } else {
+      try { candleSeries.update(last); } catch(e) { console.warn('update skip', e.message); }
+    } else if (!last || bucketStart > last.time) {
       const newCandle = { time: bucketStart, open: price, high: price, low: price, close: price };
       state.liveCandles.push(newCandle);
-      candleSeries.update(newCandle);
+      try { candleSeries.update(newCandle); } catch(e) { console.warn('update skip', e.message); }
     }
   } else {
-    // Para TFs nativos: hacer fetch periódico de las últimas velas
+    // Para TFs nativos: fetch de las últimas velas y solo actualizar las más nuevas
     const recent = await fetchMEXCKlines(state.symbol, state.interval, 3);
-    if (recent.length > 0) {
-      for (const c of recent) {
-        const existing = state.liveCandles.find(x => x.time === c.time);
-        if (existing) {
-          Object.assign(existing, c);
-        } else {
-          state.liveCandles.push(c);
-        }
-        candleSeries.update(c);
+    if (recent.length === 0) return;
+
+    // Ordenar cronológicamente
+    recent.sort((a, b) => a.time - b.time);
+
+    const lastTimeInChart = state.liveCandles.length > 0
+      ? state.liveCandles[state.liveCandles.length - 1].time
+      : 0;
+
+    for (const c of recent) {
+      if (c.time < lastTimeInChart) {
+        // Vela vieja, ignorar
+        continue;
+      } else if (c.time === lastTimeInChart) {
+        // Actualizar última vela (sigue formándose)
+        const existing = state.liveCandles[state.liveCandles.length - 1];
+        Object.assign(existing, c);
+        try { candleSeries.update(c); } catch(e) { console.warn('update skip', e.message); }
+      } else {
+        // Vela nueva, agregar
+        state.liveCandles.push(c);
+        try { candleSeries.update(c); } catch(e) { console.warn('update skip', e.message); }
       }
     }
   }
