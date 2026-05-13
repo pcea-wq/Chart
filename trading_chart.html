@@ -425,8 +425,8 @@ async function loadChart() {
 // ============================================================
 function startPolling() {
   stopPolling();
-  const intervalMs = SYNTHETIC_INTERVALS[state.interval] ? 2000 : 5000;
-  state.pollTimer = setInterval(tick, intervalMs);
+  // Polling cada 2 segundos para sentir el movimiento del precio
+  state.pollTimer = setInterval(tick, 2000);
   tick();
 }
 
@@ -466,11 +466,27 @@ async function tick() {
       try { candleSeries.update(newCandle); } catch(e) { console.warn('update skip', e.message); }
     }
   } else {
-    // Para TFs nativos: fetch de las últimas velas y solo actualizar las más nuevas
+    // Para TFs nativos: PRIMERO actualizar la última vela con el precio en vivo
+    // (así el chart se mueve aunque MEXC no haya cerrado la vela todavía)
+    const last = state.liveCandles[state.liveCandles.length - 1];
+    if (last) {
+      last.high = Math.max(last.high, price);
+      last.low = Math.min(last.low, price);
+      last.close = price;
+      try { candleSeries.update(last); } catch(e) { console.warn('live update skip', e.message); }
+    }
+
+    // SEGUNDO: cada cierto tiempo, hacer fetch de las velas nuevas (cuando se cierran)
+    state.tickCounter = (state.tickCounter || 0) + 1;
+    const intervalSecs = { Min1: 60, Min5: 300, Min15: 900, Min30: 1800, Min60: 3600, Hour4: 14400, Day1: 86400 };
+    const sec = intervalSecs[state.interval] || 60;
+    // Hacer fetch real cada N ticks dependiendo del TF (más frecuente para TFs pequeños)
+    const fetchEvery = sec <= 60 ? 4 : sec <= 900 ? 12 : 60; // ticks
+    if (state.tickCounter % fetchEvery !== 0) return;
+
     const recent = await fetchMEXCKlines(state.symbol, state.interval, 3);
     if (recent.length === 0) return;
 
-    // Ordenar cronológicamente
     recent.sort((a, b) => a.time - b.time);
 
     const lastTimeInChart = state.liveCandles.length > 0
@@ -479,15 +495,15 @@ async function tick() {
 
     for (const c of recent) {
       if (c.time < lastTimeInChart) {
-        // Vela vieja, ignorar
         continue;
       } else if (c.time === lastTimeInChart) {
-        // Actualizar última vela (sigue formándose)
         const existing = state.liveCandles[state.liveCandles.length - 1];
+        // Mantener el high/low expandido si nuestro precio en vivo fue más extremo
+        c.high = Math.max(c.high, existing.high);
+        c.low = Math.min(c.low, existing.low);
         Object.assign(existing, c);
         try { candleSeries.update(c); } catch(e) { console.warn('update skip', e.message); }
       } else {
-        // Vela nueva, agregar
         state.liveCandles.push(c);
         try { candleSeries.update(c); } catch(e) { console.warn('update skip', e.message); }
       }
